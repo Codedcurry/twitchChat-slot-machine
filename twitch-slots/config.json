@@ -1,0 +1,16 @@
+{
+  "port": 7878,
+  "spinDurationMs": 5000,
+  "twitch": {
+    "clientId": "ruq6p032phlzgsvnekpap432p38us2",
+    "rewardTitle": "Spin the Slots"
+  },
+  "rewards": [
+    { "name": "Hydrate! Streamer drinks water", "symbol": "🍒", "weight": 30 },
+    { "name": "Chatter picks the next song", "symbol": "🍋", "weight": 20 },
+    { "name": "Streamer does 10 push-ups", "symbol": "🔔", "weight": 15 },
+    { "name": "Streamer spins around in his chair", "symbol": "⭐", "weight": 10 },
+    { "name": "JACKPOT: VIP for a day", "symbol": "💎", "weight": 3 },
+    { "name": "Better luck next time", "weight": 22 }
+  ]
+}

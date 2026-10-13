@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Slots Control Panel</title>
+<style>
+  :root { color-scheme: dark; --accent: #9146ff; --green: #3ddc84; --muted: #a9a3b8; }
+  body {
+    margin: 0;
+    padding: 24px 16px;
+    background: #18151f;
+    color: #eee;
+    font-family: "Segoe UI", system-ui, sans-serif;
+  }
+  main { max-width: 720px; margin: 0 auto; display: grid; gap: 18px; }
+  h1 { margin: 0; font-size: 24px; }
+  section { background: #24202e; border-radius: 12px; padding: 16px 18px; }
+  h2 { margin: 0 0 10px; font-size: 16px; color: var(--muted); font-weight: 600; }
+  .spin {
+    width: 100%;
+    padding: 18px;
+    font-size: 22px;
+    font-weight: 800;
+    border: 0;
+    border-radius: 12px;
+    background: var(--accent);
+    color: #fff;
+    cursor: pointer;
+  }
+  .spin:disabled { background: #3a3446; color: #888; cursor: default; }
+  .next { margin-top: 8px; color: var(--muted); text-align: center; min-height: 1.2em; }
+  ol, ul { margin: 0; padding-left: 22px; }
+  li { padding: 4px 0; }
+  li button {
+    margin-left: 8px;
+    border: 0;
+    background: none;
+    color: #f66;
+    cursor: pointer;
+    font-size: 14px;
+  }
+  .empty { color: var(--muted); }
+  form { display: flex; gap: 8px; }
+  input {
+    flex: 1;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid #444;
+    background: #18151f;
+    color: #eee;
+  }
+  form button, .link {
+    padding: 8px 14px;
+    border-radius: 8px;
+    border: 0;
+    background: #3a3446;
+    color: #eee;
+    cursor: pointer;
+    text-decoration: none;
+    font-size: 14px;
+  }
+  .row { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .status { font-weight: 700; }
+  .status.connected { color: var(--green); }
+  .win { color: var(--green); }
+  code { background: #18151f; padding: 2px 6px; border-radius: 6px; }
+  .error { color: #f66; min-height: 1.2em; margin: 6px 0 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>🎰 Slots Control Panel</h1>
+
+  <section>
+    <button class="spin" id="spin" disabled>Spin next</button>
+    <div class="next" id="next"></div>
+    <p class="error" id="error"></p>
+  </section>
+
+  <section>
+    <h2>Saved spins (<span id="count">0</span>)</h2>
+    <ol id="queue"></ol>
+    <p class="empty" id="queue-empty">Nobody has redeemed yet.</p>
+  </section>
+
+  <section>
+    <h2>Add a spin by hand</h2>
+    <form id="add">
+      <input id="user" placeholder="username" maxlength="25" autocomplete="off">
+      <button>Add</button>
+    </form>
+  </section>
+
+  <section>
+    <h2>Recent spins</h2>
+    <ul id="history"></ul>
+    <p class="empty" id="history-empty">No spins yet.</p>
+  </section>
+
+  <section class="row">
+    <div>Twitch: <span class="status" id="twitch">…</span></div>
+    <a class="link" href="/auth">Connect Twitch</a>
+  </section>
+
+  <section>
+    OBS browser source: <code id="overlay-url"></code>
+  </section>
+</main>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  let state = null;
+  let lockedUntil = 0;
+  let unlockTimer = null;
+
+  $('overlay-url').textContent = `${location.origin}/overlay`;
+
+  async function post(path, body) {
+    const res = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body ?? {}),
+    });
+    const data = await res.json().catch(() => ({}));
+    $('error').textContent = res.ok ? '' : data.error ?? `Error ${res.status}`;
+    return res.ok;
+  }
+
+  function li(text, extra) {
+    const item = document.createElement('li');
+    item.append(text);
+    if (extra) item.append(extra);
+    return item;
+  }
+
+  function render() {
+    if (!state) return;
+    const spinning = Date.now() < lockedUntil;
+    $('spin').disabled = state.count === 0 || spinning;
+    $('spin').textContent = spinning ? 'Spinning…' : 'Spin next';
+    $('next').textContent = state.count ? `Next up: ${state.pending[0].user}` : '';
+    $('count').textContent = state.count;
+
+    $('queue').replaceChildren(...state.pending.map((e) => {
+      const remove = document.createElement('button');
+      remove.textContent = '✕ remove';
+      remove.title = 'Remove this spin';
+      remove.onclick = () => post('/api/remove', { id: e.id });
+      return li(e.user, remove);
+    }));
+    $('queue-empty').hidden = state.count > 0;
+
+    $('history').replaceChildren(...state.history.map((h) => {
+      const item = li(`${h.user} → ${h.reels.join(' ')} ${h.reward}`);
+      if (h.win) item.className = 'win';
+      return item;
+    }));
+    $('history-empty').hidden = state.history.length > 0;
+
+    $('twitch').textContent = state.twitch;
+    $('twitch').className = `status ${state.twitch === 'connected' ? 'connected' : ''}`;
+  }
+
+  function lockFor(ms) {
+    lockedUntil = Date.now() + ms;
+    clearTimeout(unlockTimer);
+    unlockTimer = setTimeout(render, ms + 50);
+  }
+
+  $('spin').onclick = async () => {
+    $('spin').disabled = true;
+    await post('/api/spin');
+  };
+
+  $('add').onsubmit = async (e) => {
+    e.preventDefault();
+    const user = $('user').value.trim();
+    if (user && (await post('/api/redeem', { user }))) $('user').value = '';
+  };
+
+  const events = new EventSource('/events');
+  events.addEventListener('state', (e) => {
+    state = JSON.parse(e.data);
+    if (state.spinning && Date.now() >= lockedUntil) lockFor(state.spinDurationMs);
+    if (!state.spinning) lockedUntil = 0;
+    render();
+  });
+  events.addEventListener('spin', (e) => {
+    lockFor(JSON.parse(e.data).durationMs);
+    render();
+  });
+  events.onerror = () => {
+    $('twitch').textContent = 'slots server is not running';
+    $('spin').disabled = true;
+  };
+</script>
+</body>
+</html>

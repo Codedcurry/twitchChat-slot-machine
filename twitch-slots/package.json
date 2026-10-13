@@ -1,0 +1,14 @@
+{
+  "name": "twitch-slots",
+  "version": "1.0.0",
+  "description": "Channel-point slot machine overlay where the streamer decides when saved spins happen",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

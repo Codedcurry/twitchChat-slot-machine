@@ -1,0 +1,8 @@
+# Twitch login token and the saved spin queue (private, per machine)
+data/
+
+# Custom sound files (keep the README that explains them)
+sounds/*
+!sounds/README.txt
+
+node_modules/

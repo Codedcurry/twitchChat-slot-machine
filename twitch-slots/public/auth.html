@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Connect Twitch</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    margin: 0;
+    padding: 48px 16px;
+    background: #18151f;
+    color: #eee;
+    font-family: "Segoe UI", system-ui, sans-serif;
+    text-align: center;
+  }
+  a.button {
+    display: inline-block;
+    margin-top: 16px;
+    padding: 14px 22px;
+    border-radius: 10px;
+    background: #9146ff;
+    color: #fff;
+    font-weight: 700;
+    text-decoration: none;
+  }
+  .ok { color: #3ddc84; }
+  .bad { color: #f66; }
+</style>
+</head>
+<body>
+  <h1>Connect Twitch</h1>
+  <p id="message">Loading…</p>
+  <p><a href="/control">Back to the control panel</a></p>
+
+<script>
+  const message = document.getElementById('message');
+  const show = (text, cls = '') => { message.textContent = text; message.className = cls; };
+
+  async function main() {
+    const hash = new URLSearchParams(location.hash.slice(1));
+    const query = new URLSearchParams(location.search);
+    // Remove the token from the address bar right away.
+    history.replaceState(null, '', '/auth');
+
+    if (hash.get('access_token')) {
+      show('Connecting…');
+      const res = await fetch('/api/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: hash.get('access_token'), state: hash.get('state') }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) show('Connected! Channel point redeems will now be saved.', 'ok');
+      else show(data.error ?? 'Something went wrong.', 'bad');
+      return;
+    }
+    if (query.get('error')) {
+      show(`Twitch said: ${query.get('error_description') ?? query.get('error')}`, 'bad');
+      return;
+    }
+
+    const res = await fetch('/api/auth-url');
+    const data = await res.json();
+    if (!res.ok) return show(data.error, 'bad');
+    show('Log in with the streamer’s Twitch account. Only permission to see channel point redeems is requested.');
+    const a = document.createElement('a');
+    a.className = 'button';
+    a.href = data.url;
+    a.textContent = 'Log in with Twitch';
+    message.after(a);
+  }
+  main().catch((err) => show(err.message, 'bad'));
+</script>
+</body>
+</html>

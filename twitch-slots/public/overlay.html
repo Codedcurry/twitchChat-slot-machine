@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Slot Machine Overlay</title>
+<style>
+  :root {
+    --reel-h: 120px;
+    --gold: #f5c542;
+    --green: #3ddc84;
+  }
+  html, body {
+    margin: 0;
+    background: transparent; /* OBS shows the stream behind this */
+    font-family: "Segoe UI", system-ui, sans-serif;
+    color: #fff;
+    overflow: hidden;
+  }
+  .machine {
+    width: 460px;
+    margin: 20px auto 0;
+    padding: 18px 22px 22px;
+    border-radius: 22px;
+    background: linear-gradient(180deg, #7a1fa2, #3b0d57);
+    border: 4px solid var(--gold);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, .5);
+    text-align: center;
+    /* Off screen until a spin starts; fades out after the result is shown. */
+    opacity: 0;
+    transform: scale(.92);
+    transition: opacity .6s ease, transform .6s ease;
+  }
+  .machine.shown {
+    opacity: 1;
+    transform: scale(1);
+    transition-duration: .4s;
+  }
+  .title {
+    font-size: 26px;
+    font-weight: 800;
+    letter-spacing: 2px;
+    color: var(--gold);
+    text-shadow: 0 2px 0 #000;
+  }
+  .waiting {
+    font-size: 18px;
+    margin: 4px 0 12px;
+    text-shadow: 0 1px 2px #000;
+  }
+  .waiting b { color: var(--gold); font-size: 22px; }
+  .reels {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    padding: 12px;
+    border-radius: 14px;
+    background: #1b0628;
+  }
+  .reel {
+    width: 120px;
+    height: var(--reel-h);
+    overflow: hidden;
+    border-radius: 10px;
+    background: linear-gradient(180deg, #ddd, #fff 30%, #fff 70%, #ddd);
+  }
+  .strip { will-change: transform; }
+  .strip div {
+    height: var(--reel-h);
+    line-height: var(--reel-h);
+    font-size: 72px;
+  }
+  .result {
+    min-height: 30px;
+    margin-top: 12px;
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--gold);
+    text-shadow: 0 2px 2px #000;
+  }
+  .name {
+    min-height: 44px;
+    margin-top: 6px;
+    font-size: 34px;
+    font-weight: 800;
+    text-shadow: 0 2px 3px #000;
+    transition: color .3s, opacity .4s;
+  }
+  .name.hidden { opacity: 0; }
+  .name.done { color: var(--green); }
+  .win .reels { animation: flash .4s 4 alternate; }
+  .sound-note {
+    position: fixed;
+    top: 8px;
+    left: 8px;
+    padding: 6px 10px;
+    border-radius: 8px;
+    background: rgba(0, 0, 0, .75);
+    font-size: 14px;
+  }
+  .sound-note[hidden] { display: none; }
+  @keyframes flash { to { box-shadow: 0 0 30px var(--gold); } }
+</style>
+</head>
+<body>
+  <div class="machine" id="machine">
+    <div class="title">🎰 SLOTS 🎰</div>
+    <div class="waiting">Spins waiting: <b id="count">0</b></div>
+    <div class="reels">
+      <div class="reel"><div class="strip"></div></div>
+      <div class="reel"><div class="strip"></div></div>
+      <div class="reel"><div class="strip"></div></div>
+    </div>
+    <div class="name hidden" id="name"></div>
+    <div class="result" id="result"></div>
+  </div>
+  <div class="sound-note" id="sound-note" hidden>🔇 Click anywhere to turn on sound</div>
+
+<script type="module">
+  import { SpinDisplay, nameView, machineVisible } from '/display.js';
+  import { tickTimes, REEL_EASING } from '/ticks.js';
+
+  const REEL_H = 120;
+  const FILLER = 30; // symbols that blur past before the final one
+  const strips = [...document.querySelectorAll('.strip')];
+  const nameEl = document.getElementById('name');
+  const resultEl = document.getElementById('result');
+  const countEl = document.getElementById('count');
+  const machine = document.getElementById('machine');
+  let symbols = ['🍒', '🍋', '🔔', '💎', '7️⃣'];
+  let finishTimer = null;
+
+  const display = new SpinDisplay({
+    onChange(state) {
+      const view = nameView(state);
+      // When hiding, the name and result stay as they are so they fade out
+      // together with the machine.
+      if (view.visible) {
+        nameEl.textContent = view.text;
+        nameEl.className = view.className;
+        resultEl.textContent = state.phase === 'done' ? state.reward : '';
+      }
+      machine.classList.toggle('shown', machineVisible(state));
+      if (state.phase === 'spinning') machine.classList.remove('win');
+    },
+  });
+
+  function setStrip(strip, list, offset, ms) {
+    strip.replaceChildren(...list.map((s) => {
+      const d = document.createElement('div');
+      d.textContent = s;
+      return d;
+    }));
+    strip.style.transition = 'none';
+    strip.style.transform = 'translateY(0)';
+    strip.offsetHeight; // apply the reset before animating
+    if (ms) strip.style.transition = `transform ${ms}ms cubic-bezier(${REEL_EASING.join(',')})`;
+    strip.style.transform = `translateY(${-offset * REEL_H}px)`;
+  }
+
+  // Show a random resting row at load.
+  strips.forEach((s) => setStrip(s, [symbols[Math.floor(Math.random() * symbols.length)]], 0, 0));
+
+  // ---- Sound ----
+  // Built-in sounds are synthesized; tick/win files in the sounds folder
+  // replace them. Add ?volume=0.3 or ?sound=off to the overlay URL to change.
+  const params = new URLSearchParams(location.search);
+  const soundOn = params.get('sound') !== 'off';
+  const volume = Math.min(1, Math.max(0, Number(params.get('volume') ?? 0.6) || 0));
+  const audio = new AudioContext();
+  const master = audio.createGain();
+  master.gain.value = volume;
+  master.connect(audio.destination);
+  const custom = {};
+  const noise = audio.createBuffer(1, Math.floor(audio.sampleRate * 0.03), audio.sampleRate);
+  noise.getChannelData(0).forEach((_, i, data) => (data[i] = Math.random() * 2 - 1));
+
+  if (soundOn) {
+    for (const name of ['tick', 'win']) {
+      fetch(`/sounds/${name}`)
+        .then((r) => (r.ok ? r.arrayBuffer() : null))
+        .then((bytes) => bytes && audio.decodeAudioData(bytes))
+        .then((buffer) => { if (buffer) custom[name] = buffer; })
+        .catch(() => {});
+    }
+  }
+
+  // Browsers keep audio off until the page is clicked. OBS doesn't, so this
+  // note only appears when the overlay is opened in a normal browser tab.
+  const soundNote = document.getElementById('sound-note');
+  function checkAudio() {
+    soundNote.hidden = !soundOn || audio.state === 'running';
+  }
+  audio.onstatechange = checkAudio;
+  document.addEventListener('click', () => audio.resume());
+  setTimeout(checkAudio, 300);
+
+  function playBuffer(buffer, t = audio.currentTime) {
+    const src = audio.createBufferSource();
+    src.buffer = buffer;
+    src.connect(master);
+    src.start(t);
+  }
+
+  // t is a time on the audio clock, so ticks can be scheduled ahead.
+  function playTick(t) {
+    if (!soundOn) return;
+    if (custom.tick) return playBuffer(custom.tick, t);
+    // A short bright blip plus a burst of filtered noise: a crisp "tk".
+    const osc = audio.createOscillator();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(2600, t);
+    osc.frequency.exponentialRampToValueAtTime(1300, t + 0.03);
+    const oscGain = audio.createGain();
+    oscGain.gain.setValueAtTime(0.35, t);
+    oscGain.gain.exponentialRampToValueAtTime(0.001, t + 0.04);
+    osc.connect(oscGain).connect(master);
+    osc.start(t);
+    osc.stop(t + 0.05);
+
+    const hiss = audio.createBufferSource();
+    hiss.buffer = noise;
+    const filter = audio.createBiquadFilter();
+    filter.type = 'highpass';
+    filter.frequency.value = 3500;
+    const hissGain = audio.createGain();
+    hissGain.gain.setValueAtTime(0.25, t);
+    hissGain.gain.exponentialRampToValueAtTime(0.001, t + 0.025);
+    hiss.connect(filter).connect(hissGain).connect(master);
+    hiss.start(t);
+  }
+
+  function bell(freq, start, length, level) {
+    for (const [mult, amount] of [[1, 1], [2.01, 0.35], [3.02, 0.12]]) {
+      const osc = audio.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.value = freq * mult;
+      const gain = audio.createGain();
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(level * amount, start + 0.008);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + length / mult);
+      osc.connect(gain).connect(master);
+      osc.start(start);
+      osc.stop(start + length);
+    }
+  }
+
+  function playWin() {
+    if (!soundOn) return;
+    if (custom.win) return playBuffer(custom.win);
+    const t = audio.currentTime;
+    // A quick rising sparkle that rings out: the "item revealed" moment.
+    [1318.5, 1661.2, 1975.5, 2637].forEach((f, i) => bell(f, t + i * 0.06, 1.4, 0.22));
+    bell(659.25, t, 1.8, 0.3);
+    bell(987.77, t + 0.24, 1.8, 0.18);
+  }
+
+  // Ticks follow the last reel, which spins longest, so they slow to a stop
+  // as it lands, like a case opening. All of them are scheduled up front.
+  function scheduleTicks(reelMs) {
+    if (audio.state !== 'running') return; // not enabled yet; see sound-note
+    const start = audio.currentTime + 0.02; // the reel starts moving next frame
+    for (const ms of tickTimes({ durationMs: reelMs, symbols: FILLER })) playTick(start + ms / 1000);
+  }
+
+  function runSpin({ user, reward, win, reels, durationMs, symbols: pool }) {
+    if (pool?.length) symbols = pool;
+    clearTimeout(finishTimer);
+    display.start(user);
+    reels.forEach((final, i) => {
+      const list = Array.from({ length: FILLER }, () => symbols[Math.floor(Math.random() * symbols.length)]);
+      list.push(final);
+      // Reels stop left to right; the last one stops when the spin ends.
+      setStrip(strips[i], list, FILLER, durationMs * (0.6 + 0.2 * i));
+    });
+    scheduleTicks(durationMs);
+    finishTimer = setTimeout(() => {
+      if (win) {
+        machine.classList.add('win');
+        playWin();
+      }
+      display.finish(win ? `won ${reward}!` : reward);
+    }, durationMs);
+  }
+
+  const events = new EventSource('/events');
+  events.addEventListener('state', (e) => {
+    countEl.textContent = JSON.parse(e.data).count;
+  });
+  events.addEventListener('spin', (e) => runSpin(JSON.parse(e.data)));
+</script>
+</body>
+</html>
